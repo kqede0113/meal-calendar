@@ -1,0 +1,1 @@
+CREATE TABLE device_profiles (calendar_id TEXT NOT NULL REFERENCES calendars(id), device_hash TEXT NOT NULL, member_id TEXT NOT NULL REFERENCES members(id), PRIMARY KEY(calendar_id, device_hash), UNIQUE(calendar_id, member_id));
