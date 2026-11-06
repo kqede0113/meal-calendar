@@ -16,7 +16,11 @@ export function validateRecords(records) {
 export function totalFor(records, prefix) {
   return records.reduce((sum, e) => sum + (e.date.startsWith(prefix) ? e.amount : 0), 0);
 }
+export function totalsByMember(records, members, prefix) {
+  return members.map(member=>({...member,total:records.reduce((sum,e)=>sum+(e.memberId===member.id && e.date.startsWith(prefix)?e.amount:0),0)}));
+}
 export function shiftMonth(month, delta) {
   const [y,m] = month.split('-').map(Number);
   return dateKey(new Date(y,m-1+delta,1)).slice(0,7);
 }
+

@@ -1,7 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validDate,validEntry,validateRecords,totalFor,shiftMonth,dateKey} from '../docs/model.js';
+import {validDate,validEntry,validateRecords,totalFor,totalsByMember,shiftMonth,dateKey} from '../docs/model.js';
 const meal={id:'a',date:'2026-11-06',type:'昼食',name:'定食',amount:650};
+test('per-name totals follow saved identities, including after a name change',()=>{
+ const records=[{...meal,memberId:'alice'},{...meal,id:'b',memberId:'bob',amount:500},{...meal,id:'c',memberId:'alice',date:'2026-12-06',amount:800}];
+ const totals=totalsByMember(records,[{id:'alice',name:'楓のiPhone'},{id:'bob',name:'もう1人'}],'2026-11-');
+ assert.deepEqual(totals.map(p=>p.total),[650,500]);assert.equal(totals.reduce((s,p)=>s+p.total,0),totalFor(records,'2026-11-'));
+ const renamed=totalsByMember(records,[{id:'alice',name:'楓'}],'2026-11-');assert.equal(renamed[0].name,'楓');assert.equal(renamed[0].total,650);
+});
 test('monthly and daily totals do not include other months or days',()=>{
  const records=[meal,{...meal,id:'b',amount:300},{...meal,id:'c',date:'2026-11-07',amount:0},{...meal,id:'d',date:'2026-12-06',amount:900}];
  assert.equal(totalFor(records,'2026-11-'),950); assert.equal(totalFor(records,'2026-11-06'),950); assert.equal(totalFor(records,'2026-12-'),900); assert.equal(totalFor([], '2026-11-'),0);
@@ -18,3 +24,4 @@ test('dates handle leap years, year boundaries and local date keys',()=>{
  assert.equal(shiftMonth('2026-12',1),'2027-01'); assert.equal(shiftMonth('2026-01',-1),'2025-12');
  assert.equal(dateKey(new Date(2026,10,6,0,1)),'2026-11-06');
 });
+

@@ -13,3 +13,4 @@ createServer(async (req, res) => {
     res.writeHead(200, {'Content-Type': {'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript'}[extname(file)] || 'application/octet-stream'}).end(data);
   } catch { res.writeHead(404).end('Not found'); }
 }).listen(port, '0.0.0.0');
+
