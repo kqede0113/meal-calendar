@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validDate,validEntry,validateRecords,totalFor,shiftMonth,dateKey} from '../dist/model.js';
+import {validDate,validEntry,validateRecords,totalFor,shiftMonth,dateKey} from '../docs/model.js';
 const meal={id:'a',date:'2026-11-06',type:'昼食',name:'定食',amount:650};
 test('monthly and daily totals do not include other months or days',()=>{
  const records=[meal,{...meal,id:'b',amount:300},{...meal,id:'c',date:'2026-11-07',amount:0},{...meal,id:'d',date:'2026-12-06',amount:900}];

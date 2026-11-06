@@ -26,4 +26,8 @@ npm test
 
 ## 配置
 
-`dist/` を静的サイトとして配信します。ビルドは不要です。
+`docs/` を静的サイトとして配信します。ビルドは不要です。
+
+## GitHub Pages
+
+GitHub の Settings → Pages で「Deploy from a branch」、ブランチ `main`、フォルダー `/docs` を設定します。`docs/` の変更は自動で公開されます。
