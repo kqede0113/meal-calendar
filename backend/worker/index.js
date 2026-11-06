@@ -11,21 +11,28 @@ function json(data,status=200){return new Response(JSON.stringify(data),{status,
 async function members(db,calendar){return(await db.prepare('SELECT id,name FROM members WHERE calendar_id=? ORDER BY rowid').bind(calendar).all()).results;}
 async function authenticate(request,db){const match=/^Bearer ([a-zA-Z0-9_-]{43})$/.exec(request.headers.get('authorization')||'');if(!match)throw new HttpError(401,'共有リンクから開いてください。');const calendar=await digest(match[1]);if(!await db.prepare('SELECT id FROM calendars WHERE id=?').bind(calendar).first())throw new HttpError(401,'共有リンクを確認してください。');return calendar;}
 function deviceKey(request){const key=request.headers.get('x-device-key');if(!KEY.test(key||''))throw new HttpError(401,'ページを更新して、この端末の名前を登録してください。');return key;}
-async function device(request,db,calendar,required=true){const key=request.headers.get('x-device-key');let result=null;if(KEY.test(key||''))result=await db.prepare('SELECT m.id,m.name FROM device_profiles d JOIN members m ON m.id=d.member_id AND m.calendar_id=d.calendar_id WHERE d.calendar_id=? AND d.device_hash=?').bind(calendar,await digest(key)).first();if(!result&&required)throw new HttpError(401,'この端末の名前を登録してください。');return result;}
-async function registerDevice(request,db,calendar,input){const name=cleanName(input.name),hash=await digest(deviceKey(request));let own=await device(request,db,calendar,false);
-  if(!own){let candidate=null;
-    if(typeof input.legacyMemberId==='string'&&ID.test(input.legacyMemberId))candidate=await db.prepare('SELECT m.id,m.name FROM members m WHERE m.calendar_id=? AND m.id=? AND NOT EXISTS(SELECT 1 FROM device_profiles d WHERE d.calendar_id=m.calendar_id AND d.member_id=m.id)').bind(calendar,input.legacyMemberId).first();
-    if(!candidate)candidate=await db.prepare('SELECT m.id,m.name FROM members m WHERE m.calendar_id=? AND m.name=? AND NOT EXISTS(SELECT 1 FROM device_profiles d WHERE d.calendar_id=m.calendar_id AND d.member_id=m.id)').bind(calendar,name).first();
-    if(!candidate){const id=crypto.randomUUID();try{candidate=await db.prepare('INSERT INTO members(id,calendar_id,name) SELECT ?,?,? WHERE (SELECT count(*) FROM members WHERE calendar_id=?)<2 RETURNING id,name').bind(id,calendar,name,calendar).first();}catch{throw new HttpError(409,'その名前はもう1人が使っています。別の名前を入力してください。');}}
-    if(!candidate)throw new HttpError(409,'2人の名前が登録済みです。登録した端末から開いてください。');
-    const claimed=await db.prepare('INSERT INTO device_profiles(calendar_id,device_hash,member_id) SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM device_profiles WHERE calendar_id=? AND member_id=?) ON CONFLICT DO NOTHING RETURNING member_id AS id').bind(calendar,hash,candidate.id,calendar,candidate.id).first();
-    own=await device(request,db,calendar,false);if(!claimed&&!own)throw new HttpError(409,'別の端末が登録中です。もう一度お試しください。');
-  }
-  let updated;try{updated=await db.prepare('UPDATE members SET name=? WHERE calendar_id=? AND id=? RETURNING id,name').bind(name,calendar,own.id).first();}catch{throw new HttpError(409,'その名前はもう1人が使っています。別の名前を入力してください。');}
-  return {device:updated,members:await members(db,calendar)};
+async function device(request,db,calendar,required=true){
+ const key=request.headers.get('x-device-key');let result=null;
+ if(KEY.test(key||'')){
+  const hash=await digest(key);
+  result=await db.prepare('SELECT m.id,m.name FROM name_sessions s JOIN members m ON m.id=s.member_id AND m.calendar_id=s.calendar_id WHERE s.calendar_id=? AND s.device_hash=?').bind(calendar,hash).first();
+  if(!result)result=await db.prepare('SELECT m.id,m.name FROM device_profiles d JOIN members m ON m.id=d.member_id AND m.calendar_id=d.calendar_id WHERE d.calendar_id=? AND d.device_hash=?').bind(calendar,hash).first();
+ }
+ if(!result&&required)throw new HttpError(401,'登録済みの名前を入力してください。');return result;
+}
+async function registerDevice(request,db,calendar,input){
+ const name=cleanName(input.name),hash=await digest(deviceKey(request));
+ let person=await db.prepare('SELECT id,name FROM members WHERE calendar_id=? AND name=?').bind(calendar,name).first();
+ if(!person){
+  try{person=await db.prepare('INSERT INTO members(id,calendar_id,name) SELECT ?,?,? WHERE (SELECT count(*) FROM members WHERE calendar_id=?)<2 RETURNING id,name').bind(crypto.randomUUID(),calendar,name,calendar).first();}catch{}
+  if(!person)person=await db.prepare('SELECT id,name FROM members WHERE calendar_id=? AND name=?').bind(calendar,name).first();
+  if(!person)throw new HttpError(409,'2人の名前が登録済みです。登録済みの名前を入力してください。');
+ }
+ await db.prepare('INSERT INTO name_sessions(calendar_id,device_hash,member_id) VALUES(?,?,?) ON CONFLICT(calendar_id,device_hash) DO UPDATE SET member_id=excluded.member_id').bind(calendar,hash,person.id).run();
+ return {device:person,members:await members(db,calendar)};
 }
 async function route(request,env){const url=new URL(request.url),db=env.DB;if(url.pathname==='/')return Response.redirect(PAGE,302);if(url.pathname==='/api/health'&&request.method==='GET')return json({ok:true});if(!db)throw new HttpError(503,'共有保存を準備しています。少し待って再試行してください。');
-  if(url.pathname==='/api/calendars'&&request.method==='POST'){const input=await body(request),name=cleanName(input.name),hash=await digest(deviceKey(request)),key=newKey(),calendar=await digest(key),memberId=crypto.randomUUID();const day=Math.floor(Date.now()/86400000),limitId=await digest(`${request.headers.get('cf-connecting-ip')||'unknown'}:${day}`);const limit=await db.prepare('INSERT INTO creation_limits(id,count,expires_at) VALUES(?,1,?) ON CONFLICT(id) DO UPDATE SET count=count+1 WHERE count<10 RETURNING count').bind(limitId,Date.now()+172800000).first();if(!limit)throw new HttpError(429,'すでに作成した共有リンクを使ってください。');await db.batch([db.prepare('INSERT INTO calendars(id,created_at) VALUES(?,?)').bind(calendar,Date.now()),db.prepare('INSERT INTO members(id,calendar_id,name) VALUES(?,?,?)').bind(memberId,calendar,name),db.prepare('INSERT INTO device_profiles(calendar_id,device_hash,member_id) VALUES(?,?,?)').bind(calendar,hash,memberId),db.prepare('DELETE FROM creation_limits WHERE expires_at<?').bind(Date.now())]);return json({key,device:{id:memberId,name},members:[{id:memberId,name}]},201);}
+  if(url.pathname==='/api/calendars'&&request.method==='POST'){const input=await body(request),name=cleanName(input.name),hash=await digest(deviceKey(request)),key=newKey(),calendar=await digest(key),memberId=crypto.randomUUID();const day=Math.floor(Date.now()/86400000),limitId=await digest(`${request.headers.get('cf-connecting-ip')||'unknown'}:${day}`);const limit=await db.prepare('INSERT INTO creation_limits(id,count,expires_at) VALUES(?,1,?) ON CONFLICT(id) DO UPDATE SET count=count+1 WHERE count<10 RETURNING count').bind(limitId,Date.now()+172800000).first();if(!limit)throw new HttpError(429,'すでに作成した共有リンクを使ってください。');await db.batch([db.prepare('INSERT INTO calendars(id,created_at) VALUES(?,?)').bind(calendar,Date.now()),db.prepare('INSERT INTO members(id,calendar_id,name) VALUES(?,?,?)').bind(memberId,calendar,name),db.prepare('INSERT INTO name_sessions(calendar_id,device_hash,member_id) VALUES(?,?,?)').bind(calendar,hash,memberId),db.prepare('DELETE FROM creation_limits WHERE expires_at<?').bind(Date.now())]);return json({key,device:{id:memberId,name},members:[{id:memberId,name}]},201);}
   const calendar=await authenticate(request,db);
   if(url.pathname==='/api/entries'&&request.method==='GET'){const month=url.searchParams.get('month');if(!MONTH.test(month||''))throw new HttpError(400,'月の指定を確認してください。');const result=await db.batch([db.prepare(`SELECT ${FIELDS} FROM entries WHERE calendar_id=? AND date LIKE ? ORDER BY date,updated_at`).bind(calendar,month+'-%'),db.prepare('SELECT id,name FROM members WHERE calendar_id=? ORDER BY rowid').bind(calendar)]);return json({entries:result[0].results,members:result[1].results,device:await device(request,db,calendar,false)});}
   if(url.pathname==='/api/device'&&request.method==='POST')return json(await registerDevice(request,db,calendar,await body(request)));
