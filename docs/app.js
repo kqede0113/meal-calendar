@@ -43,7 +43,7 @@ async function connect(key,preferredMember='') {
   if(!validKey(key))throw Error('共有リンク・コードを確認してください。');
   const nextAPI=new SyncAPI(key),data=await nextAPI.list(month);validateResponse(data);
   requestSequence++;api=nextAPI;members=data.members;memberId=members.some(m=>m.id===preferredMember)?preferredMember:'';records=data.entries;loadedMonth=month;
-  saveProfile();renderCalendar();updateSharingUI();status('同期済み',true);
+  saveProfile();renderCalendar();updateSharingUI();status('同期済み',true);$('storageError').hidden=true;
   if(memberId){resetForm();$('setupDialog').close();}else showSetup();
 }
 async function refresh() {
@@ -197,7 +197,7 @@ $('setupForm').addEventListener('submit',async event=>{
   const name=$('deviceName').value.trim();if(!name)return;
   const creating=!api;setBusy(true);$('setupError').hidden=true;
   try {
-    if(creating){const result=await new SyncAPI().create(name);await connect(result.key,result.memberId);showShare();}
+    if(creating){const result=await new SyncAPI().create(name);try{localStorage.setItem(PROFILE_KEY,JSON.stringify({key:result.key,memberId:result.memberId}));}catch{}await connect(result.key,result.memberId);showShare();}
     else {const result=memberId?await api.renameMember(memberId,name):await api.addMember(name);members=result.members;memberId=result.member.id;saveProfile();resetForm();updateSharingUI();renderCalendar();$('setupDialog').close();}
   } catch(error){showSetupError(error.message);}finally{setBusy(false);}
 });
@@ -208,6 +208,7 @@ $('joinForm').addEventListener('submit',async event=>{
 });
 $('copyLink').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('sharedLink').value);$('copyStatus').textContent='コピーしました。相手に送ってください。';}catch{$('sharedLink').focus();$('sharedLink').select();$('copyStatus').textContent='リンクを選択しました。コピーして相手に送ってください。';}});
 $('importLegacy').addEventListener('click',()=>mutate(async()=>{for(let i=0;i<legacy.length;i+=100)await api.import(legacy.slice(i,i+100).map(e=>({...e,memberId})));return {};},()=>{try{localStorage.setItem('meal-calendar.imported-to.v1',api.key);}catch{}$('importLegacy').hidden=true;}));
+window.addEventListener('storage',async event=>{if(event.key!==PROFILE_KEY||!api)return;try{const profile=JSON.parse(event.newValue||'null');if(profile?.key===api.key){await refresh();if(members.some(m=>m.id===profile.memberId)){memberId=profile.memberId;savedProfile=profile;updateSharingUI();}}}catch{}});
 window.addEventListener('online',refresh);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 setInterval(refresh,5000);
 renderCalendar();updateSharingUI();
